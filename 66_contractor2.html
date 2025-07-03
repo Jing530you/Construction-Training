@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>安全生产考试</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        padding: 20px;
+        max-width: 600px;
+        margin: auto;
+      }
+      #login-section,
+      #reading-section,
+      #quiz-section {
+        margin-top: 20px;
+      }
+      #reading-section {
+        height: 400px;
+        border: 1px solid #ccc;
+        overflow-y: auto;
+        position: relative;
+      }
+      #reading-content img {
+        width: 100%;
+        user-select: none;
+      }
+      #countdown {
+        margin-top: 10px;
+        font-weight: bold;
+      }
+      button {
+        padding: 8px 16px;
+        margin-top: 10px;
+        cursor: pointer;
+      }
+      .question {
+        margin-bottom: 15px;
+      }
+      label {
+        margin-right: 10px;
+      }
+      #quiz-result {
+        margin-top: 20px;
+        font-weight: bold;
+      }
+      #retry-btn {
+        margin-top: 10px;
+        display: none;
+      }
+      #login-info {
+        color: green;
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>安全生产在线考试</h1>
+
+    <!-- 登录 -->
+    <div id="login-section">
+      <h2>登录</h2>
+      <input id="name" placeholder="请输入姓名" /><br /><br />
+      <input
+        id="id4"
+        placeholder="请输入身份证后4位"
+        maxlength="4"
+      /><br /><br />
+      <button id="login-btn">登录</button>
+      <p id="login-error" style="color: red"></p>
+      <p id="login-info"></p>
+    </div>
+
+    <!-- 管理员登录按钮 -->
+    <button id="show-admin-btn">管理员登录</button>
+
+    <!-- 管理员 -->
+    <div id="admin-section" style="display: none">
+      <h2>管理员登录</h2>
+      <input id="admin-username" placeholder="用户名" /><br /><br />
+      <input
+        id="admin-password"
+        placeholder="密码"
+        type="password"
+      /><br /><br />
+      <button id="admin-login-btn">登录管理员后台</button>
+      <p id="admin-error" style="color: red"></p>
+    </div>
+
+    <!-- 管理后台 -->
+    <div id="admin-panel" style="display: none">
+      <h2>管理后台</h2>
+      <button id="download-log-btn">下载登录记录</button>
+      <p id="admin-log-info"></p>
+    </div>
+
+    <!-- 资料浏览 -->
+    <div id="reading-section" style="display: none">
+      <h2>安全生产资料浏览</h2>
+      <div
+        id="reading-content"
+        style="height: 350px; overflow-y: auto; border: 1px solid #ddd"
+      >
+        <img
+          src="./img/background2.jpg"
+          style="width: 100%; margin-bottom: 10px"
+        />
+        <img
+          src="./img/background3.png"
+          style="width: 100%; margin-bottom: 10px"
+        />
+        <img
+          src="./img/background4.png"
+          style="width: 100%; margin-bottom: 10px"
+        />
+      </div>
+      <div id="countdown">倒计时：<span id="timer">10</span>秒</div>
+      <p style="font-size: 0.9em; color: #666">
+        请滑动浏览资料，倒计时将在滑动时开始计时，倒计时结束后才能答题。
+      </p>
+    </div>
+
+    <!-- 答题 -->
+    <div id="quiz-section" style="display: none">
+      <h2>安全生产考试</h2>
+      <form id="quiz-form">
+        <!-- 题目动态生成 -->
+      </form>
+      <p id="quiz-result"></p>
+      <button id="retry-btn">重新培训</button>
+    </div>
+
+    <script>
+      const loginSection = document.getElementById("login-section");
+      const readingSection = document.getElementById("reading-section");
+      const readingContent = document.getElementById("reading-content");
+      const quizSection = document.getElementById("quiz-section");
+      const loginBtn = document.getElementById("login-btn");
+      const loginError = document.getElementById("login-error");
+      const loginInfo = document.getElementById("login-info");
+      const timerSpan = document.getElementById("timer");
+      const quizForm = document.getElementById("quiz-form");
+      const quizResult = document.getElementById("quiz-result");
+      const retryBtn = document.getElementById("retry-btn");
+
+      let countdown = 10;
+      let timerInterval = null;
+      let lastScrollTime = 0;
+      let userKey = ""; // 用户唯一标识 = 姓名 + "_" + 身份证后4位
+
+      // 设备唯一ID，存localStorage
+      const deviceIdKey = "device_unique_id";
+      function getDeviceId() {
+        let id = localStorage.getItem(deviceIdKey);
+        if (!id) {
+          id = "dev-" + Math.random().toString(36).substr(2, 9);
+          localStorage.setItem(deviceIdKey, id);
+        }
+        return id;
+      }
+
+      // 绑定设备与账号
+      // localStorage里的对象 device_bindings: { deviceId: userKey }
+      function bindDeviceToUser(userKey) {
+        const deviceId = getDeviceId();
+        const bindings = JSON.parse(
+          localStorage.getItem("device_bindings") || "{}"
+        );
+        if (bindings[deviceId] && bindings[deviceId] !== userKey) {
+          // 设备绑定了别的账号，禁止切换
+          return false;
+        }
+        bindings[deviceId] = userKey;
+        localStorage.setItem("device_bindings", JSON.stringify(bindings));
+        return true;
+      }
+
+      // 培训数据管理
+      // key: "training_{userKey}"，值为时间戳字符串
+      function getTrainingKey(userKey) {
+        return "training_" + userKey;
+      }
+
+      function hasValidTraining(userKey) {
+        const key = getTrainingKey(userKey);
+        const ts = localStorage.getItem(key);
+        if (!ts) return false;
+        const oneYearMs = 365 * 24 * 3600 * 1000;
+        const now = Date.now();
+        if (now - parseInt(ts, 10) > oneYearMs) {
+          localStorage.removeItem(key); // 超过一年清除记录
+          return false;
+        }
+        return true;
+      }
+
+      function setTrainingPassed(userKey) {
+        const key = getTrainingKey(userKey);
+        localStorage.setItem(key, Date.now().toString());
+      }
+
+      loginBtn.onclick = () => {
+        const name = document.getElementById("name").value.trim();
+        const id4 = document.getElementById("id4").value.trim();
+        loginError.innerText = "";
+        loginInfo.innerText = "";
+
+        if (!name) {
+          loginError.innerText = "请输入姓名";
+          return;
+        }
+        if (id4.length !== 4 || !/^\d{4}$/.test(id4)) {
+          loginError.innerText = "请输入正确的身份证后4位数字";
+          return;
+        }
+
+        userKey = name + "_" + id4;
+
+        // 保存登录记录
+        function saveLoginRecord(userKey) {
+          const logs = JSON.parse(localStorage.getItem("login_logs") || "[]");
+          logs.push({ user: userKey, time: Date.now() });
+          localStorage.setItem("login_logs", JSON.stringify(logs));
+        }
+        saveLoginRecord(userKey);
+
+        // 绑定设备和账号，防止替答
+        if (!bindDeviceToUser(userKey)) {
+          loginError.innerText = "该设备已绑定其他账号，禁止替他人答题！";
+          return;
+        }
+
+        // 检查是否已有有效培训记录
+        if (hasValidTraining(userKey)) {
+          loginInfo.innerText = "您已通过培训，无需重复培训。";
+          loginBtn.disabled = true;
+          document.getElementById("name").disabled = true;
+          document.getElementById("id4").disabled = true;
+          return;
+        }
+
+        loginSection.style.display = "none";
+        startReading();
+      };
+
+      function startTimer() {
+        if (timerInterval) return;
+        timerInterval = setInterval(() => {
+          const now = Date.now();
+          if (now - lastScrollTime < 1000) {
+            countdown--;
+            timerSpan.innerText = countdown;
+            if (countdown <= 0) {
+              clearInterval(timerInterval);
+              timerInterval = null;
+              finishReading();
+            }
+          }
+        }, 1000);
+      }
+
+      function startReading() {
+        countdown = 10;
+        timerSpan.innerText = countdown;
+        readingSection.style.display = "block";
+        quizSection.style.display = "none";
+        quizResult.innerText = "";
+        retryBtn.style.display = "none";
+
+        lastScrollTime = 0;
+        if (timerInterval) {
+          clearInterval(timerInterval);
+          timerInterval = null;
+        }
+
+        // 绑定滑动事件，触发倒计时
+        const triggerScroll = () => {
+          lastScrollTime = Date.now();
+          startTimer();
+        };
+
+        readingContent.addEventListener("wheel", triggerScroll);
+        readingContent.addEventListener("touchmove", triggerScroll);
+
+        // 为防止事件重复绑定，存引用用以解绑
+        readingSection._triggerScroll = triggerScroll;
+      }
+
+      function finishReading() {
+        readingSection.style.display = "none";
+
+        // 解绑滚动事件，防止内存泄漏
+        if (readingSection._triggerScroll) {
+          readingContent.removeEventListener(
+            "wheel",
+            readingSection._triggerScroll
+          );
+          readingContent.removeEventListener(
+            "touchmove",
+            readingSection._triggerScroll
+          );
+          readingSection._triggerScroll = null;
+        }
+
+        showQuiz();
+      }
+
+      const quizData = [
+        {
+          q: "1. 安全生产的第一要务是什么？",
+          options: ["安全", "效率"],
+          answer: "安全",
+        },
+        {
+          q: "2. 佩戴安全帽的正确时间是？",
+          options: ["工作时", "休息时"],
+          answer: "工作时",
+        },
+        {
+          q: "3. 安全生产责任制的核心内容是？",
+          options: ["谁主管谁负责", "谁不管谁负责"],
+          answer: "谁主管谁负责",
+        },
+        {
+          q: "4. 发现安全隐患后应？",
+          options: ["立即报告", "忽视"],
+          answer: "立即报告",
+        },
+        {
+          q: "5. 安全生产标志颜色中，表示警告的是？",
+          options: ["黄色", "绿色"],
+          answer: "黄色",
+        },
+      ];
+
+      function showQuiz() {
+        quizSection.style.display = "block";
+        quizResult.innerText = "";
+        retryBtn.style.display = "none";
+        quizForm.innerHTML = "";
+
+        quizData.forEach((item, i) => {
+          const div = document.createElement("div");
+          div.className = "question";
+          div.innerHTML =
+            `<p>${item.q}</p>` +
+            item.options
+              .map(
+                (opt) =>
+                  `<label><input type="radio" name="q${
+                    i + 1
+                  }" value="${opt}"> ${opt}</label>`
+              )
+              .join("");
+          quizForm.appendChild(div);
+        });
+
+        const submitBtn = document.createElement("button");
+        submitBtn.type = "submit";
+        submitBtn.innerText = "提交答题";
+        quizForm.appendChild(submitBtn);
+
+        quizForm.onsubmit = (e) => {
+          e.preventDefault();
+          let allCorrect = true;
+          for (let i = 0; i < quizData.length; i++) {
+            const radios = quizForm.elements[`q${i + 1}`];
+            let userAnswer = null;
+            for (const r of radios) {
+              if (r.checked) userAnswer = r.value;
+            }
+            if (userAnswer !== quizData[i].answer) {
+              allCorrect = false;
+              break;
+            }
+          }
+
+          if (allCorrect) {
+            quizResult.innerText = "✅ 恭喜，考试通过！培训结束。";
+            setTrainingPassed(userKey);
+            retryBtn.style.display = "none";
+          } else {
+            quizResult.innerText = "❌ 未全部答对，考试未通过。";
+            retryBtn.style.display = "inline-block";
+          }
+        };
+      }
+
+      // 管理员登录
+      const adminLoginBtn = document.getElementById("admin-login-btn");
+      const adminPanel = document.getElementById("admin-panel");
+      const adminError = document.getElementById("admin-error");
+      const downloadLogBtn = document.getElementById("download-log-btn");
+      const adminLogInfo = document.getElementById("admin-log-info");
+
+      adminLoginBtn.onclick = () => {
+        const username = document.getElementById("admin-username").value.trim();
+        const password = document.getElementById("admin-password").value;
+
+        if (username === "SuperB" && password === "Login123") {
+          adminPanel.style.display = "block";
+          document.getElementById("admin-section").style.display = "none";
+          adminError.innerText = "";
+        } else {
+          adminError.innerText = "管理员用户名或密码错误";
+        }
+      };
+
+      // 显示管理员登录输入区域
+      const showAdminBtn = document.getElementById("show-admin-btn");
+      showAdminBtn.onclick = () => {
+        document.getElementById("admin-section").style.display = "block";
+        showAdminBtn.style.display = "none"; // 隐藏按钮
+      };
+
+      // 管理员下载记录
+      downloadLogBtn.onclick = () => {
+        const logs = JSON.parse(localStorage.getItem("login_logs") || "[]");
+        const oneYearAgo = Date.now() - 365 * 24 * 3600 * 1000;
+
+        const recentLogs = logs.filter((log) => log.time >= oneYearAgo);
+
+        if (recentLogs.length === 0) {
+          adminLogInfo.innerText = "近一年无登录记录。";
+          return;
+        }
+
+        let csvContent = "用户,登录时间\n";
+        recentLogs.forEach((log) => {
+          const date = new Date(log.time).toLocaleString();
+          csvContent += `${log.user},${date}\n`;
+        });
+
+        const blob = new Blob([csvContent], {
+          type: "text/csv;charset=utf-8;",
+        });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "login_logs.csv";
+        link.click();
+      };
+
+      // 重新培训按钮点击，回到资料浏览重新培训
+      retryBtn.onclick = () => {
+        quizSection.style.display = "none";
+        startReading();
+      };
+    </script>
+  </body>
+</html>
